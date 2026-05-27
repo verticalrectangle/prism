@@ -57,4 +57,5 @@ struct AppState {
     bool model_loaded = false;
     char speaker_path_buf[512]{};
     char status_msg[128] = "Ready";
+    std::atomic<bool> easy_mode{false};
 };

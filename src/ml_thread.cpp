@@ -22,6 +22,7 @@ static void ml_thread_main(AppState* s, PrismModel* model) {
 
     YinDetector yin;
     yin.init(kSampleRate);
+    float smoothed_f0 = 0.0f;
 
     // Warm-up: wait until enough samples are buffered
     while (s->ml_running.load()) {
@@ -78,9 +79,16 @@ static void ml_thread_main(AppState* s, PrismModel* model) {
         s->ml_voiced_pct.store(voiced);
 
         // Pitch ratio toward target speaker F0
+        bool easy = s->easy_mode.load();
+        if (easy && src_f0 > 50.0f && voiced > s->param_voiced_thresh.load()) {
+            if (smoothed_f0 < 50.0f) smoothed_f0 = src_f0;
+            smoothed_f0 = smoothed_f0 * 0.85f + src_f0 * 0.15f;
+        }
+        float effective_f0 = (easy && smoothed_f0 > 50.0f) ? smoothed_f0 : src_f0;
+
         float pitch_ratio = 1.0f;
-        if (s->target_loaded && src_f0 > 50.0f && voiced > s->param_voiced_thresh.load())
-            pitch_ratio = std::clamp(s->target_f0_mean / src_f0, 0.5f, 2.0f);
+        if (s->target_loaded && effective_f0 > 50.0f && voiced > s->param_voiced_thresh.load())
+            pitch_ratio = std::clamp(s->target_f0_mean / effective_f0, 0.5f, 2.0f);
 
         // Build CoeffPacket
         CoeffPacket pkt{};

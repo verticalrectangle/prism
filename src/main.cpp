@@ -320,6 +320,18 @@ static void draw_ui(AppState& s, PrismModel& model) {
 
     ImGui::Separator();
 
+    // ── Easy mode ─────────────────────────────────────────────────────────────
+    {
+        bool easy = s.easy_mode.load();
+        if (ImGui::Checkbox("Easy Mode", &easy))
+            s.easy_mode.store(easy);
+        ImGui::SetItemTooltip(
+            "Smooths your pitch contour so natural speech glides sound more deliberate.\n"
+            "No chromatic snapping — just damped pitch response (~250ms time constant).");
+    }
+
+    ImGui::Separator();
+
     // ── Status bar ────────────────────────────────────────────────────────────
     bool live = s.audio_active.load();
     bool ml   = s.ml_running.load();
