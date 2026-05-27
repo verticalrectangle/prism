@@ -1,7 +1,8 @@
 #include "prism.h"
-#include "model.h"
 #include "lpc.h"
 #include "yin.h"
+
+struct PrismModel;
 
 #include <chrono>
 #include <thread>
@@ -39,11 +40,13 @@ static void ml_thread_main(AppState* s, PrismModel* model) {
 
         s->input_ring.pull(chunk_buf, kChunk);
 
-        // HuBERT conv features
-        const float* feat = model->infer(chunk_buf, kChunk);
-
-        // Source LPC from features
-        features_to_autocorr(feat, kFeatDim, autocorr, kOrder);
+        // Source LPC from direct audio autocorrelation
+        for (int lag = 0; lag <= kOrder; ++lag) {
+            float sum = 0.0f;
+            for (int i = 0; i < kChunk - lag; ++i)
+                sum += chunk_buf[i] * chunk_buf[i + lag];
+            autocorr[lag] = (lag == 0) ? sum + 1e-6f : sum;
+        }
         levinson_durbin(autocorr, kOrder, lpc_src);
 
         // Warp toward target speaker

@@ -58,48 +58,64 @@ static std::string dl_key(const std::string& repo, const std::string& file) {
     return repo + "::" + file;
 }
 
-// ── Inline export + load ──────────────────────────────────────────────────────
+// ── Use model ─────────────────────────────────────────────────────────────────
 
 static void use_model(const std::string& pth_path, AppState& s, PrismModel& model) {
     ml_thread_stop(&s);
-    s.model_loaded = false;
 
-    std::string onnx = pth_path.substr(0, pth_path.rfind('.')) + ".onnx";
-
-    if (fs::exists(onnx)) {
-        try {
-            model.load(onnx);
-            s.model_loaded = true;
-            snprintf(s.status_msg, sizeof(s.status_msg), "Model ready");
-            if (s.target_loaded) ml_thread_start(&s, &model);
-        } catch (const std::exception& e) {
-            snprintf(s.status_msg, sizeof(s.status_msg), "Load error: %s", e.what());
-        }
-        return;
-    }
-
-    // Export needed — run on background thread
     s.export_status.store(1);
-    snprintf(s.status_msg, sizeof(s.status_msg), "Exporting encoder...");
+    snprintf(s.status_msg, sizeof(s.status_msg), "Loading...");
 
-    std::thread([pth_path, onnx, &s, &model]() {
+    std::thread([pth_path, &s, &model]() {
         PthModel pth = pth_open(pth_path);
-        std::string err = pth.err.empty() ? conv_encoder_to_onnx(pth, onnx) : pth.err;
-        pth_close(pth);
-        if (!err.empty()) {
-            s.export_error = err;
+        if (!pth.err.empty()) {
+            s.export_error = pth.err;
             s.export_status.store(3);
             return;
         }
-        try {
-            model.load(onnx);
-            s.model_loaded = true;
-        } catch (const std::exception& e) {
-            s.export_error = e.what();
-            s.export_status.store(3);
-            return;
+
+        bool is_rvc = pth.tensors.count("enc_p.emb_phone.weight") > 0;
+
+        if (is_rvc) {
+            // Extract gin speaker embedding → target LPC
+            int gin_dim = pth.config.gin_channels; // typically 256
+            auto gin = pth_load_tensor(pth, "emb_g.weight");
+            pth_close(pth);
+
+            float autocorr[13]{};
+            if (!gin.empty()) {
+                int dim = std::min((int)gin.size(), gin_dim);
+                features_to_autocorr(gin.data(), dim, autocorr, 12);
+            }
+            levinson_durbin(autocorr, 12, s.target_lpc);
+            s.target_f0_mean = 130.0f;
+            s.target_loaded  = true;
+            s.model_path     = pth_path;
+            s.export_status.store(2);
+        } else {
+            // HuBERT conv encoder path — export to ONNX, load into model
+            pth_close(pth);
+            std::string onnx = pth_path.substr(0, pth_path.rfind('.')) + ".onnx";
+            if (!fs::exists(onnx)) {
+                PthModel pth2 = pth_open(pth_path);
+                std::string err = pth2.err.empty() ? conv_encoder_to_onnx(pth2, onnx) : pth2.err;
+                pth_close(pth2);
+                if (!err.empty()) {
+                    s.export_error = err;
+                    s.export_status.store(3);
+                    return;
+                }
+            }
+            try {
+                model.load(onnx);
+                s.model_loaded = true;
+            } catch (const std::exception& e) {
+                s.export_error = e.what();
+                s.export_status.store(3);
+                return;
+            }
+            s.export_status.store(2);
         }
-        s.export_status.store(2);
     }).detach();
 }
 
@@ -109,8 +125,8 @@ static void draw_ui(AppState& s, PrismModel& model) {
     // Poll export thread status
     int exp = s.export_status.load();
     if (exp == 2) {
-        snprintf(s.status_msg, sizeof(s.status_msg), "Model ready");
-        if (s.target_loaded) ml_thread_start(&s, &model);
+        snprintf(s.status_msg, sizeof(s.status_msg), "Voice ready");
+        if (!s.ml_running.load()) ml_thread_start(&s, &model);
         s.export_status.store(0);
     } else if (exp == 3) {
         snprintf(s.status_msg, sizeof(s.status_msg), "Export failed: %s",
@@ -256,7 +272,7 @@ static void draw_ui(AppState& s, PrismModel& model) {
                 s.target_loaded  = true;
                 snprintf(s.status_msg, sizeof(s.status_msg), "Speaker loaded: %s",
                     fs::path(s.speaker_path).filename().c_str());
-                if (s.model_loaded && !s.ml_running.load())
+                if (!s.ml_running.load())
                     ml_thread_start(&s, &model);
             } else {
                 snprintf(s.status_msg, sizeof(s.status_msg), "Failed to decode: %s",
