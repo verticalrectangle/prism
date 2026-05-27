@@ -24,7 +24,7 @@ struct AppState {
     // Lock-free communication between threads
     SpscQueue<64>  coeff_queue;
     InputRing      input_ring;
-    CoeffPacket    last_packet{};
+    CoeffPacket    last_packet = []{ CoeffPacket p{}; p.pitch_ratio = 1.0f; return p; }();
 
     // DSP state (audio thread only)
     BiquadCascade cascade[2];

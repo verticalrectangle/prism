@@ -18,19 +18,25 @@ void audio_callback(ma_device* dev, void* out, const void* in, ma_uint32 frames)
     const float* inp  = (const float*)in;
     float*       outp = (float*)out;
 
-    // Mono mix into InputRing for ML thread (left channel only)
-    s->input_ring.push(inp, frames);
+    // Extract left channel into InputRing (inp is interleaved stereo)
+    {
+        float mono[2048];
+        ma_uint32 n = frames < 2048 ? frames : 2048;
+        for (ma_uint32 i = 0; i < n; ++i)
+            mono[i] = inp[i * 2];
+        s->input_ring.push(mono, n);
+    }
 
     float mix    = s->param_mix.load();
     float voiced = s->last_packet.voiced;
     float thresh = s->param_voiced_thresh.load();
+    // Pitch shift only on voiced frames; spectral warp always applies
+    double ratio = (voiced >= thresh) ? static_cast<double>(s->last_packet.pitch_ratio) : 1.0;
 
     for (ma_uint32 i = 0; i < frames; ++i) {
-        float x = inp[i * 2];  // mono from left channel
-
-        float y = s->shifter[0].process(x, static_cast<double>(s->last_packet.pitch_ratio));
-        y = (voiced >= thresh) ? s->cascade[0].process(y) : x;
-
+        float x = inp[i * 2];
+        float y = s->shifter[0].process(x, ratio);
+        y = s->cascade[0].process(y);
         float wet = x + (y - x) * mix;
         outp[i * 2]     = wet;
         outp[i * 2 + 1] = wet;
@@ -39,13 +45,14 @@ void audio_callback(ma_device* dev, void* out, const void* in, ma_uint32 frames)
 
 bool audio_init(AppState* s, ma_device* dev) {
     ma_device_config cfg = ma_device_config_init(ma_device_type_duplex);
-    cfg.capture.format   = ma_format_f32;
-    cfg.capture.channels = 2;
-    cfg.playback.format  = ma_format_f32;
+    cfg.capture.format    = ma_format_f32;
+    cfg.capture.channels  = 2;
+    cfg.playback.format   = ma_format_f32;
     cfg.playback.channels = 2;
-    cfg.sampleRate       = 44100;
-    cfg.dataCallback     = audio_callback;
-    cfg.pUserData        = s;
+    cfg.sampleRate        = 44100;
+    cfg.periodSizeInFrames = 256;
+    cfg.dataCallback      = audio_callback;
+    cfg.pUserData         = s;
 
     if (ma_device_init(nullptr, &cfg, dev) != MA_SUCCESS)
         return false;

@@ -102,8 +102,6 @@ static void ml_thread_main(AppState* s, PrismModel* model) {
         auto t_end = std::chrono::steady_clock::now();
         float ms = std::chrono::duration<float, std::milli>(t_end - t_start).count();
         s->ml_ms_per_chunk.store(ms);
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 }
 
