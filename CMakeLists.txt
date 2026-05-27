@@ -16,15 +16,16 @@ set(IMGUI_SOURCES
     ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
-# ── Main application ──────────────────────────────────────────────────────────
 add_executable(prism
     src/main.cpp
     src/audio.cpp
     src/ml_thread.cpp
     src/model.cpp
-    src/rvc_onnx.cpp
+    src/lpc.cpp
     src/pth_reader.cpp
     src/hf_api.cpp
+    src/encoder_onnx.cpp
+    vendor/yin.cpp
     ${IMGUI_SOURCES}
 )
 
@@ -47,22 +48,7 @@ target_link_libraries(prism PRIVATE
 
 target_compile_options(prism PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
 
-# ── prism-export-hubert: hubert_base.pt → hubert.onnx (full 12-layer model) ──
-add_executable(prism-export-hubert
-    tools/export_hubert.cpp
-    src/hubert_onnx.cpp
-    src/pth_reader.cpp
-)
-
-target_include_directories(prism-export-hubert PRIVATE
-    include
-    /usr/include/onnxruntime
-)
-
-target_link_libraries(prism-export-hubert PRIVATE dl pthread)
-target_compile_options(prism-export-hubert PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
-
-# ── prism-export-encoder: hubert_base.pt → prism_encoder.onnx (conv only) ────
+# ── prism-export-encoder: .pth → prism_encoder.onnx (conv layers only) ───────
 add_executable(prism-export-encoder
     tools/export_encoder.cpp
     src/encoder_onnx.cpp
