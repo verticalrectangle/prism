@@ -1,5 +1,4 @@
 #include "prism.h"
-#include "yin.h"
 
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"

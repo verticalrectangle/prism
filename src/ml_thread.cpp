@@ -1,6 +1,7 @@
 #include "prism.h"
 #include "model.h"
 #include "lpc.h"
+#include "yin.h"
 
 #include <chrono>
 #include <thread>
@@ -10,11 +11,16 @@
 static constexpr int kOrder    = 12;
 static constexpr int kChunk    = 1764;   // 40ms @ 44.1k
 
+static constexpr float kSampleRate = 44100.0f;
+
 static void ml_thread_main(AppState* s, PrismModel* model) {
     float chunk_buf[kChunk];
     float autocorr[kOrder + 1];
     float lpc_src[kOrder];
     float lpc_warp[kOrder];
+
+    YinDetector yin;
+    yin.init(kSampleRate);
 
     // Warm-up: wait until enough samples are buffered
     while (s->ml_running.load()) {
@@ -61,12 +67,24 @@ static void ml_thread_main(AppState* s, PrismModel* model) {
             }
         }
 
+        // YIN pitch detection on raw chunk
+        for (int i = 0; i < kChunk; ++i) yin.push_sample(chunk_buf[i]);
+        if (yin.pending) yin.run_detect();
+        float src_f0   = yin.pitch_hz;
+        float voiced   = yin.confidence;
+        s->ml_voiced_pct.store(voiced);
+
+        // Pitch ratio toward target speaker F0
+        float pitch_ratio = 1.0f;
+        if (s->target_loaded && src_f0 > 50.0f && voiced > s->param_voiced_thresh.load())
+            pitch_ratio = std::clamp(s->target_f0_mean / src_f0, 0.5f, 2.0f);
+
         // Build CoeffPacket
         CoeffPacket pkt{};
         float gain = 1.0f;
         lpc_to_biquad(lpc_warp, kOrder, pkt.biquad, gain);
-        pkt.pitch_ratio = 1.0f;  // pitch handled by grain shifter based on voiced
-        pkt.voiced = 0.5f;       // placeholder — YIN runs in audio thread
+        pkt.pitch_ratio = pitch_ratio;
+        pkt.voiced      = voiced;
 
         s->coeff_queue.push(pkt);
 
