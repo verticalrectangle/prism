@@ -1,7 +1,8 @@
 #pragma once
 
 struct AppState;
-struct PrismModel;
+struct HubertModel;
+struct RvcModel;
 
-void ml_thread_start(AppState* s, PrismModel* model);
+void ml_thread_start(AppState* s, HubertModel* hubert, RvcModel* rvc);
 void ml_thread_stop(AppState* s);
