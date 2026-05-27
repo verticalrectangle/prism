@@ -49,9 +49,12 @@ struct AppState {
     ma_device* audio_device = nullptr;
     std::atomic<bool> audio_active{false};
 
+    // Export thread state (written by export thread, read by UI thread)
+    std::atomic<int> export_status{0};  // 0=idle 1=running 2=done 3=error
+    std::string      export_error;
+
     // UI state
     bool model_loaded = false;
-    char model_path_buf[512]{};
     char speaker_path_buf[512]{};
     char status_msg[128] = "Ready";
 };

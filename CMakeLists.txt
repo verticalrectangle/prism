@@ -23,6 +23,8 @@ add_executable(prism
     src/model.cpp
     src/lpc.cpp
     src/pth_reader.cpp
+    src/hf_api.cpp
+    src/encoder_onnx.cpp
     vendor/yin.cpp
     ${IMGUI_SOURCES}
 )

@@ -94,23 +94,24 @@ sudo ldconfig
 
 Prism uses only the 7-layer convolutional feature extractor from HuBERT base (input `[1, N]` → output `[1, 512, T]`). The 12 transformer layers are skipped — the conv stack alone runs in ~3ms per 40ms chunk on CPU.
 
-Export from a fairseq HuBERT base `.pt` checkpoint using the included tool:
+The app handles export automatically. When you select a `.pth` from the HuggingFace browser (or after a download completes), Prism runs `conv_encoder_to_onnx()` in a background thread and shows "Exporting encoder..." in the status bar. The result is cached next to the `.pth` so subsequent launches load instantly.
 
-```bash
-./build/prism-export-encoder hubert_base.pt prism_encoder.onnx
-```
+The exporter uses the same hand-rolled pickle VM and protobuf writer as [Pop Maker Studio](https://github.com/verticalrectangle/pop-maker-studio) — no Python, no PyTorch, no protobuf library required.
 
-The exporter uses the same hand-rolled pickle VM and protobuf writer as [Pop Maker Studio](https://github.com/verticalrectangle/pop-maker-studio) — no Python, no PyTorch, no protobuf library required. Weight-norm is resolved at export time. Run once; the `.onnx` is cached.
+> **Power users / CI**: `./build/prism-export-encoder <model.pth> <out.onnx>` runs the export headlessly.
 
 ---
 
 ## Usage
 
 1. Launch `./build/prism`
-2. Enter the path to your exported `prism_encoder.onnx` and click **Load Model**
-3. Enter the path to a target speaker `.wav` (any length, mono or stereo) and click **Load Speaker**
-4. Speak into your mic — the status bar shows `● LIVE` and ML latency in ms/chunk
-5. Adjust Blend to taste; Formant Shift and Voiced Threshold shape character further
+2. Pick a voice from the pinned list or search HuggingFace — click **Download**, then **Use**
+3. The encoder exports automatically (~10s the first time, instant on relaunch)
+4. Enter the path to a target speaker `.wav` and click **Load Speaker**
+5. Speak into your mic — the status bar shows `● LIVE` and ML latency in ms/chunk
+6. Adjust Blend to taste; Formant Shift and Voiced Threshold shape character further
+
+Models are cached at `~/.cache/prism/models/` — no re-download or re-export on relaunch.
 
 ---
 
