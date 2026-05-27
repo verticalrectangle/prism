@@ -92,14 +92,15 @@ sudo ldconfig
 
 ## Model setup
 
-Prism expects the HuBERT convolutional feature extractor exported to ONNX (input `[1, N]` → output `[1, 512, T]`). The transformer layers are not used — only the 7 conv layers, which run in ~3ms per 40ms chunk on CPU.
+Prism uses only the 7-layer convolutional feature extractor from HuBERT base (input `[1, N]` → output `[1, 512, T]`). The 12 transformer layers are skipped — the conv stack alone runs in ~3ms per 40ms chunk on CPU.
 
-Export from a pretrained `.pth` (RVC-compatible checkpoint) using the pickle VM from [Pop Maker Studio](https://github.com/verticalrectangle/pop-maker-studio):
+Export from a fairseq HuBERT base `.pt` checkpoint using the included tool:
 
-```python
-# Export script — run once, result is cached as prism_encoder.onnx
-# (export tooling coming soon)
+```bash
+./build/prism-export-encoder hubert_base.pt prism_encoder.onnx
 ```
+
+The exporter uses the same hand-rolled pickle VM and protobuf writer as [Pop Maker Studio](https://github.com/verticalrectangle/pop-maker-studio) — no Python, no PyTorch, no protobuf library required. Weight-norm is resolved at export time. Run once; the `.onnx` is cached.
 
 ---
 

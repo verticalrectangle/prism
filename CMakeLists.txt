@@ -45,3 +45,18 @@ target_link_libraries(prism PRIVATE
 )
 
 target_compile_options(prism PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
+
+# ── prism-export-encoder: .pth → prism_encoder.onnx (conv layers only) ───────
+add_executable(prism-export-encoder
+    tools/export_encoder.cpp
+    src/encoder_onnx.cpp
+    src/pth_reader.cpp
+)
+
+target_include_directories(prism-export-encoder PRIVATE
+    include
+    /usr/include/onnxruntime
+)
+
+target_link_libraries(prism-export-encoder PRIVATE dl pthread)
+target_compile_options(prism-export-encoder PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
