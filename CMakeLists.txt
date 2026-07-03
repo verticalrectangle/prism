@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 find_package(OpenGL REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GLFW REQUIRED glfw3)
+pkg_check_modules(FFTW3F REQUIRED fftw3f)
+# Native PipeWire duplex for low-latency monitoring; miniaudio is the fallback.
+pkg_check_modules(PIPEWIRE libpipewire-0.3)
 
 set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/vendor/imgui)
 set(IMGUI_SOURCES
@@ -19,15 +22,24 @@ set(IMGUI_SOURCES
 add_executable(prism
     src/main.cpp
     src/audio.cpp
+    src/audio_pw.cpp
     src/ml_thread.cpp
-    src/model.cpp
-    src/lpc.cpp
+    src/dsp.cpp
+    src/rmvpe_onnx.cpp
+    src/hubert_encoder.cpp
+    src/rvc_onnx.cpp
     src/pth_reader.cpp
     src/hf_api.cpp
-    src/encoder_onnx.cpp
     vendor/yin.cpp
     ${IMGUI_SOURCES}
 )
+
+add_executable(prism-test
+    tools/test_dsp.cpp
+    src/dsp.cpp
+)
+target_include_directories(prism-test PRIVATE include)
+target_compile_options(prism-test PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
 
 target_include_directories(prism PRIVATE
     include
@@ -35,30 +47,61 @@ target_include_directories(prism PRIVATE
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
     ${GLFW_INCLUDE_DIRS}
+    ${FFTW3F_INCLUDE_DIRS}
     /usr/include/onnxruntime
 )
 
 target_link_libraries(prism PRIVATE
     OpenGL::GL
     ${GLFW_LIBRARIES}
+    ${FFTW3F_LIBRARIES}
     onnxruntime
     dl
     pthread
 )
 
-target_compile_options(prism PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
-
-# ── prism-export-encoder: .pth → prism_encoder.onnx (conv layers only) ───────
-add_executable(prism-export-encoder
-    tools/export_encoder.cpp
-    src/encoder_onnx.cpp
-    src/pth_reader.cpp
+add_executable(prism-test-pipeline
+    tools/test_pipeline.cpp
+    src/ml_thread.cpp
+    src/dsp.cpp
+    src/rmvpe_onnx.cpp
+    src/hubert_encoder.cpp
+    vendor/yin.cpp
 )
-
-target_include_directories(prism-export-encoder PRIVATE
+target_include_directories(prism-test-pipeline PRIVATE
     include
+    vendor
+    ${FFTW3F_INCLUDE_DIRS}
     /usr/include/onnxruntime
 )
+target_link_libraries(prism-test-pipeline PRIVATE
+    ${FFTW3F_LIBRARIES}
+    onnxruntime
+    pthread
+)
+target_compile_options(prism-test-pipeline PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
 
-target_link_libraries(prism-export-encoder PRIVATE dl pthread)
-target_compile_options(prism-export-encoder PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
+add_executable(prism-test-rmvpe
+    tools/test_rmvpe.cpp
+    src/rmvpe_onnx.cpp
+)
+target_include_directories(prism-test-rmvpe PRIVATE
+    include
+    ${FFTW3F_INCLUDE_DIRS}
+    /usr/include/onnxruntime
+)
+target_link_libraries(prism-test-rmvpe PRIVATE
+    ${FFTW3F_LIBRARIES}
+    onnxruntime
+    pthread
+)
+target_compile_options(prism-test-rmvpe PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
+
+target_compile_options(prism PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
+
+if(PIPEWIRE_FOUND)
+    target_compile_definitions(prism PRIVATE HAVE_PIPEWIRE)
+    target_include_directories(prism PRIVATE ${PIPEWIRE_INCLUDE_DIRS})
+    target_link_libraries(prism PRIVATE ${PIPEWIRE_LIBRARIES})
+endif()
+
