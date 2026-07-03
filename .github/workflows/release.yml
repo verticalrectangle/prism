@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            cmake ninja-build \
+            libglfw3-dev \
+            libgl1-mesa-dev \
+            pkg-config \
+            curl \
+            python3-pip
+
+      - name: Install ONNX Runtime
+        run: |
+          curl -sL https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-linux-x64-1.20.1.tgz \
+            -o /tmp/ort.tgz
+          tar -xzf /tmp/ort.tgz -C /tmp/
+          sudo mkdir -p /usr/include/onnxruntime
+          sudo cp -r /tmp/onnxruntime-linux-x64-1.20.1/include/* /usr/include/onnxruntime/
+          sudo cp -r /tmp/onnxruntime-linux-x64-1.20.1/lib/* /usr/lib/
+          sudo ldconfig
+
+      - name: Fetch imgui
+        run: |
+          rm -rf vendor/imgui
+          git clone --depth=1 -b docking https://github.com/ocornut/imgui.git vendor/imgui
+
+      - name: Build
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+
+      - name: Prepare wav2vec2 model
+        run: |
+          pip install --quiet onnx
+          mkdir -p release/models
+
+          echo "Downloading wav2vec2-base-960h (float32)..."
+          curl -fsSL \
+            "https://huggingface.co/Xenova/wav2vec2-base-960h/resolve/main/onnx/model.onnx" \
+            -o /tmp/wav2vec2_ctc.onnx
+
+          echo "Patching to expose hidden_states output..."
+          python3 tools/patch_wav2vec2_onnx.py \
+            /tmp/wav2vec2_ctc.onnx \
+            release/models/wav2vec2.onnx
+
+          curl -fsSL \
+            "https://huggingface.co/facebook/wav2vec2-base-960h/resolve/main/vocab.json" \
+            -o release/models/wav2vec2_vocab.json
+
+      - name: Package release
+        run: |
+          mkdir -p prism-release/lib
+
+          cp build/prism prism-release/prism.bin
+          cp -r release/models prism-release/models
+
+          # Bundle ORT and GLFW shared libraries
+          cp /tmp/onnxruntime-linux-x64-1.20.1/lib/libonnxruntime.so* prism-release/lib/
+          ldd build/prism \
+            | awk '/libglfw/ { print $3 }' \
+            | xargs -I{} cp {} prism-release/lib/
+
+          # Launcher script sets LD_LIBRARY_PATH then execs the real binary
+          cat > prism-release/prism << 'EOF'
+#!/bin/sh
+dir="$(cd "$(dirname "$0")" && pwd)"
+export LD_LIBRARY_PATH="$dir/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$dir/prism.bin" "$@"
+EOF
+          chmod +x prism-release/prism
+
+          tar -czf prism-linux-x86_64.tar.gz prism-release/
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: prism-linux-x86_64.tar.gz
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

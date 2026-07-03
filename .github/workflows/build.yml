@@ -1,0 +1,57 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            cmake ninja-build \
+            libglfw3-dev \
+            libgl1-mesa-dev \
+            pkg-config \
+            curl
+
+      - name: Install ONNX Runtime
+        run: |
+          curl -sL https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-linux-x64-1.20.1.tgz \
+            -o /tmp/ort.tgz
+          tar -xzf /tmp/ort.tgz -C /tmp/
+          sudo mkdir -p /usr/include/onnxruntime
+          sudo cp -r /tmp/onnxruntime-linux-x64-1.20.1/include/* /usr/include/onnxruntime/
+          sudo cp -r /tmp/onnxruntime-linux-x64-1.20.1/lib/* /usr/lib/
+          sudo ldconfig
+
+      - name: Fetch imgui
+        run: |
+          rm -rf vendor/imgui
+          git clone --depth=1 -b docking https://github.com/ocornut/imgui.git vendor/imgui
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel 2>&1 | tee build-log.txt; exit ${PIPESTATUS[0]}
+
+      - name: Test DSP
+        run: cmake --build build --target prism-test --parallel && ./build/prism-test
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build-log.txt
