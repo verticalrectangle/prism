@@ -11,6 +11,7 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include <random>
 #include <cstring>
 #include <cstdlib>
 
@@ -214,9 +215,30 @@ static void ml_thread_main(AppState* s) {
 
     // Streaming sine phase (cycles, mod 1) — fed to the graph's "phase" input
     // when present so each chunk continues the NSF oscillator where the
-    // previous emitted hop ended.
-    bool  has_phase_in = vits->GetInputCount() >= 4;
-    float sine_phase   = 0.f;
+    // Probe for optional inputs: phase (v2 streaming) and rnd (v3 noise sampling)
+    bool has_phase_in = false;
+    bool has_rnd_in   = false;
+    int  rnd_channels = 192;  // cfg.inter_channels default
+    {
+        Ort::AllocatorWithDefaultOptions alloc;
+        size_t n_in = vits->GetInputCount();
+        for (size_t i = 0; i < n_in; i++) {
+            std::string nm = vits->GetInputNameAllocated(i, alloc).get();
+            if (nm == "phase") has_phase_in = true;
+            if (nm == "rnd") {
+                has_rnd_in = true;
+                auto shape = vits->GetInputTypeInfo(i)
+                                 .GetTensorTypeAndShapeInfo().GetShape();
+                if (shape.size() == 3 && shape[1] > 0)
+                    rnd_channels = (int)shape[1];
+            }
+        }
+    }
+    float sine_phase = 0.f;
+
+    // Seeded RNG for reproducible noise across runs (standard RVC seed)
+    std::mt19937 rng(0x9e3779b9u);
+    std::normal_distribution<float> gauss(0.f, 1.f);
 
     // Silence gate: RVC hallucinates breathy garbage on near-silent input, so
     // below the RMS threshold we emit actual silence and skip inference
@@ -397,25 +419,50 @@ static void ml_thread_main(AppState* s) {
         }
 
         // VITS inference
-        std::vector<int64_t> sh_p = {1, n_vits, D};
-        std::vector<int64_t> sh_f = {1, n_vits};
-        std::vector<int64_t> sh_s = {1};
+        std::vector<int64_t> sh_p   = {1, n_vits, D};
+        std::vector<int64_t> sh_f   = {1, n_vits};
+        std::vector<int64_t> sh_s   = {1};
+        std::vector<int64_t> sh_rnd = {1, (int64_t)rnd_channels, n_vits};
         int64_t sid = 0;
         float phase_in = sine_phase;
 
-        Ort::Value ins[4] = {
-            Ort::Value::CreateTensor<float>  (mem, phone.data(), phone.size(), sh_p.data(), 3),
-            Ort::Value::CreateTensor<float>  (mem, f0.data(),    f0.size(),    sh_f.data(), 2),
-            Ort::Value::CreateTensor<int64_t>(mem, &sid, 1,      sh_s.data(), 1),
-            Ort::Value::CreateTensor<float>  (mem, &phase_in, 1, sh_s.data(), 1),
-        };
-        const char* in_names[]  = {"phone", "f0", "sid", "phase"};
-        const char* out_names[] = {"audio"};
+        // Seeded Gaussian noise for VITS sampling (temperature 0.6666)
+        std::vector<float> rnd_vec;
+        std::vector<Ort::Value> ins;
+        std::vector<const char*> in_names;
 
+        ins.push_back(Ort::Value::CreateTensor<float>(
+            mem, phone.data(), phone.size(), sh_p.data(), 3));
+        in_names.push_back("phone");
+
+        ins.push_back(Ort::Value::CreateTensor<float>(
+            mem, f0.data(), f0.size(), sh_f.data(), 2));
+        in_names.push_back("f0");
+
+        if (has_rnd_in) {
+            rnd_vec.resize((size_t)rnd_channels * n_vits);
+            for (auto& v : rnd_vec) v = gauss(rng) * 0.66666f;
+            ins.push_back(Ort::Value::CreateTensor<float>(
+                mem, rnd_vec.data(), rnd_vec.size(), sh_rnd.data(), 3));
+            in_names.push_back("rnd");
+        }
+
+        ins.push_back(Ort::Value::CreateTensor<int64_t>(
+            mem, &sid, 1, sh_s.data(), 1));
+        in_names.push_back("sid");
+
+        if (has_phase_in) {
+            ins.push_back(Ort::Value::CreateTensor<float>(
+                mem, &phase_in, 1, sh_s.data(), 1));
+            in_names.push_back("phase");
+        }
+
+        const char* out_names[] = {"audio"};
         std::vector<Ort::Value> result;
         try {
-            result = vits->Run(Ort::RunOptions{nullptr}, in_names, ins,
-                               has_phase_in ? 4 : 3, out_names, 1);
+            result = vits->Run(Ort::RunOptions{nullptr},
+                               in_names.data(), ins.data(), ins.size(),
+                               out_names, 1);
         } catch (const std::exception& e) {
             snprintf(s->status_msg, sizeof(s->status_msg), "VITS err: %.100s", e.what());
             continue;

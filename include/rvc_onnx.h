@@ -3,10 +3,11 @@
 // ONNX Runtime can load directly — no Python required.
 //
 // ONNX inputs:
-//   phone  [1, T, phone_dim]  float32   — HuBERT phoneme features
-//   f0     [1, T]             float32   — fundamental frequency in Hz
-//   sid    [1]                int64     — speaker id
-// ONNX output:
+//   phone  [1, T, phone_dim]     float32   — HuBERT phoneme features
+//   f0     [1, T]                float32   — fundamental frequency in Hz
+//   rnd    [1, inter_channels, T] float32   — seeded Gaussian noise (v3)
+//   sid    [1]                   int64     — speaker id
+//   phase  [1]                   float32   — sine oscillator phase (optional)
 //   audio  [1, 1, M]          float32   — synthesised waveform samples
 //
 // A sidecar JSON is written alongside the .onnx file:

@@ -166,7 +166,7 @@ static void use_model(const std::string& pth_path, AppState& s) {
             version = (it->second.shape[0] <= 512) ? 1 : 2;
         s.rvc_version.store(version);
 
-        std::string onnx = pth_path.substr(0, pth_path.rfind('.')) + "_vits2.onnx";
+        std::string onnx = pth_path.substr(0, pth_path.rfind('.')) + "_vits3.onnx";
 
         if (!fs::exists(onnx)) {
             std::string err = pth_to_onnx(pth, onnx);

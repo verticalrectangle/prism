@@ -1194,6 +1194,7 @@ std::string pth_to_onnx(const PthModel& m, const std::string& out_path)
         // ── Graph inputs ──────────────────────────────────────────────────────
         g.add_input("phone", kDtFloat, {1, -1, cfg.phone_dim});
         g.add_input("f0",    kDtFloat, {1, -1});
+        g.add_input("rnd",   kDtFloat, {1, cfg.inter_channels, -1});
         g.add_input("sid",   kDtInt64, {1});
         g.add_input("phase", kDtFloat, {1});   // sine oscillator phase (cycles)
 
@@ -1235,10 +1236,11 @@ std::string pth_to_onnx(const PthModel& m, const std::string& out_path)
         auto g_emb2  = op_unsqueeze(g, g_emb,  0, "g_emb2");           // [1, gin_ch]
         auto g_cond  = op_unsqueeze(g, g_emb2, 2, "g_cond");           // [1, gin_ch, 1]
 
-        // ── TextEncoder ───────────────────────────────────────────────────────
         auto [m_p, logs_p] = emit_enc_p(g, tl, "phone", "x_mask", T_scalar, cfg);
-        (void)logs_p;  // not used at inference (mean-only sampling)
-        std::string z = m_p;  // z = m_p  (deterministic, noise-free)
+        // VITS sampling: z = m_p + exp(logs_p) * rnd  (temperature=0.6666 baked into rnd)
+        auto logs_exp  = g.emit("Exp",  {logs_p}, {}, "logs_exp");
+        auto z_delta   = op_mul(g, logs_exp, "rnd", "z_delta");
+        std::string z  = op_add(g, m_p, z_delta, "z");
 
         // ── Flow (reverse) ────────────────────────────────────────────────────
         z = emit_flow_reverse(g, tl, z, "x_mask", g_cond, cfg.inter_channels, "fl");

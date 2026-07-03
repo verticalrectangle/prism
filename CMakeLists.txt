@@ -105,3 +105,13 @@ if(PIPEWIRE_FOUND)
     target_link_libraries(prism PRIVATE ${PIPEWIRE_LIBRARIES})
 endif()
 
+
+# ── export_vits: quick ONNX export for testing ─────────────────────────────
+add_executable(export-vits
+    tools/export_vits.cpp
+    src/rvc_onnx.cpp
+    src/pth_reader.cpp
+)
+target_include_directories(export-vits PRIVATE include vendor)
+target_link_libraries(export-vits PRIVATE onnxruntime pthread)
+target_compile_options(export-vits PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
