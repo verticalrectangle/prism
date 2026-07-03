@@ -261,15 +261,28 @@ static void ml_thread_main(AppState* s) {
 
         s->input_ring.pull(hop48.data(), kHopSamples48);
 
-        // Resample new hop 44.1k → 16k
-        size_t n16 = resample_linear(hop48.data(), kHopSamples48,
-                                     hop16.data(), kRate48, kRate16);
+        // Resample 48k → 16k with 3-tap boxcar anti-alias (3:1 ratio)
+        size_t n16 = 0;
+        for (size_t i = 0; i + 3 <= (size_t)kHopSamples48; i += 3)
+            hop16[n16++] = (hop48[i] + hop48[i+1] + hop48[i+2]) * 0.33333333f;
 
         // Slide 400ms window
         std::memmove(win16.data(), win16.data() + n16,
                      (kWinSamples16 - n16) * sizeof(float));
         std::memcpy(win16.data() + (kWinSamples16 - n16), hop16.data(),
                     n16 * sizeof(float));
+
+        // Normalise window to 0.95 peak for consistent HuBERT features
+        {
+            float peak = 0.f;
+            for (int i = 0; i < kWinSamples16; ++i)
+                peak = std::max(peak, std::abs(win16[i]));
+            if (peak > 0.001f) {
+                float gain = 0.95f / peak;
+                for (int i = 0; i < kWinSamples16; ++i)
+                    win16[i] *= gain;
+            }
+        }
 
         // Silence gate — emit real silence instead of letting VITS hallucinate
         // on a near-silent window, and skip all inference while closed.
