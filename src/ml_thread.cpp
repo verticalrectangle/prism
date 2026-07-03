@@ -242,10 +242,11 @@ static void ml_thread_main(AppState* s) {
 
     // Silence gate: RVC hallucinates breathy garbage on near-silent input, so
     // below the RMS threshold we emit actual silence and skip inference
-    // entirely. Opens on one loud hop, closes after 5 quiet ones (500ms).
+    // entirely. Opens on one loud hop, closes after 2 quiet ones (200ms).
     // Threshold is UI-adjustable (mic levels vary wildly); close = open/2.
     int quiet_hops = 0;
     bool gated = true;   // start closed — the window is zeros anyway
+    bool was_gated = true;
 
     NoteSegmenter seg;
     float smoothed_f0 = 0.f;
@@ -281,11 +282,13 @@ static void ml_thread_main(AppState* s) {
             if (gated) {
                 if (rms > thr) { gated = false; quiet_hops = 0; }
             } else if (rms < thr * 0.5f) {
-                if (++quiet_hops >= 5) gated = true;
+                if (++quiet_hops >= 2) gated = true;
             } else {
                 quiet_hops = 0;
             }
             s->gate_open.store(!gated);
+            if (!gated && was_gated) smoothed_f0 = 0.f;
+            was_gated = gated;
         }
         if (gated) {
             // Fade the pending crossfade tail into silence, then zeros.
